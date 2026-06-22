@@ -1,0 +1,7 @@
+mist_nac_*.csv
+mist_nac_*.xlsx
+~$*.xlsx
+create_userguide.js
+__pycache__/
+*.pyc
+venv/

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
 Juniper Mist NAC Accounting Webhook Listener
-Listens on port 8001 for nac-accounting webhook events and logs to dated Excel files.
+Listens on port 8001 for nac-accounting webhook events and logs to dated CSV files.
 """
 
+import csv
 import json
 import os
 import logging
 from datetime import datetime, date, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from openpyxl import Workbook, load_workbook
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PORT = 8001
 DEBUG = True
-OUTPUT_DIR = "."  # Directory to store Excel files
+OUTPUT_DIR = "."  # Directory to store CSV files
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -43,7 +43,7 @@ COLUMNS = [
     "Site ID",
     "Org ID",
     "Device Cert Expiry",
-    "Timestamp (ms)",
+    "Timestamp (UTC)",
     "Session Duration (mins)",
     "RX Bytes",
     "TX Bytes",
@@ -52,36 +52,17 @@ COLUMNS = [
     "Terminate Cause",
 ]
 
-# ── Excel helpers ─────────────────────────────────────────────────────────────
+# ── CSV helpers ───────────────────────────────────────────────────────────────
 
-def get_excel_path(for_date: date = None) -> str:
+def get_csv_path(for_date: date = None) -> str:
     d = for_date or date.today()
-    return os.path.join(OUTPUT_DIR, f"mist_nac_{d.strftime('%Y-%m-%d')}.xlsx")
-
-
-def get_or_create_workbook(path: str):
-    if os.path.exists(path):
-        wb = load_workbook(path)
-        ws = wb.active
-    else:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "NAC Accounting"
-        ws.append(COLUMNS)
-        # Basic column width hints
-        for col_idx, col_name in enumerate(COLUMNS, start=1):
-            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = max(
-                len(col_name) + 2, 14
-            )
-        log.info("Created new workbook: %s", path)
-    return wb, ws
+    return os.path.join(OUTPUT_DIR, f"mist_nac_{d.strftime('%Y-%m-%d')}.csv")
 
 
 def append_event(event: dict) -> None:
-    today_path = get_excel_path()
-    wb, ws = get_or_create_workbook(today_path)
+    path = get_csv_path()
+    write_header = not os.path.exists(path)
 
-    event_type = event.get("type", "")
     received_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ts_ms = event.get("timestamp")
     ts_human = (
@@ -92,7 +73,7 @@ def append_event(event: dict) -> None:
 
     row = [
         received_at,
-        event_type,
+        event.get("type", ""),
         event.get("username", ""),
         event.get("mac", ""),
         event.get("client_ip", ""),
@@ -117,9 +98,14 @@ def append_event(event: dict) -> None:
         event.get("terminate_cause", ""),
     ]
 
-    ws.append(row)
-    wb.save(today_path)
-    log.debug("Saved row to %s", today_path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(COLUMNS)
+            log.info("Created new CSV: %s", path)
+        writer.writerow(row)
+
+    log.debug("Saved row to %s", path)
 
 # ── Debug output ──────────────────────────────────────────────────────────────
 
@@ -185,7 +171,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.wfile.write(message.encode())
 
     def log_message(self, fmt, *args):
-        # Route HTTP access log through Python logger
         log.debug("HTTP %s", fmt % args)
 
 
@@ -196,7 +181,7 @@ def main():
     print(f"Mist NAC Accounting Webhook Listener")
     print(f"  Port      : {PORT}")
     print(f"  Debug     : {DEBUG}")
-    print(f"  Output    : {os.path.abspath(OUTPUT_DIR)}/mist_nac_YYYY-MM-DD.xlsx")
+    print(f"  Output    : {os.path.abspath(OUTPUT_DIR)}/mist_nac_YYYY-MM-DD.csv")
     print(f"  Started   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
 
